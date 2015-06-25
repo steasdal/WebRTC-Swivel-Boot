@@ -1,0 +1,39 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:1.2.3.RELEASE")
+    }
+}
+
+apply plugin: 'groovy'
+apply plugin: 'war'
+apply plugin: "spring-boot"
+
+repositories {
+    jcenter()
+    mavenCentral()
+}
+
+def springbootVersion = "1.2.3.RELEASE"
+
+dependencies {
+    compile "org.codehaus.groovy:groovy-all:2.4.3"
+    compile "org.springframework.boot:spring-boot-starter-web:${springbootVersion}"
+    compile "org.springframework.boot:spring-boot-starter-jdbc:${springbootVersion}"
+    compile "org.grails:gorm-hibernate4-spring-boot:1.1.0.RELEASE"
+    compile "org.apache.commons:commons-lang3:3.3.2"
+
+    compile "org.postgresql:postgresql:9.4-1201-jdbc4"
+    compile "com.h2database:h2"
+
+    compile 'org.slf4j:slf4j-api:1.7.12'
+
+    testCompile 'junit:junit:4.12'
+    testCompile "org.spockframework:spock-core:0.7-groovy-2.0"
+    testCompile "org.spockframework:spock-spring:0.7-groovy-2.0"
+    testCompile "cglib:cglib-nodep:3.1"
+
+    providedRuntime "org.springframework.boot:spring-boot-starter-tomcat"
+}
