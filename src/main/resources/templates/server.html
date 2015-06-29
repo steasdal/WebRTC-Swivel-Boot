@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+    <head>
+        <link rel="stylesheet" type="text/css" media="all" href="../static/css/chat.css" th:href="@{/css/chat.css}" />
+    </head>
+
+    <body class="videoBody">
+        <input type="hidden" id="chatId" name="chatId" th:value="${chatId}" />
+        <input type="hidden" id="name" name="name" th:value="${name}" />
+        <input type="hidden" id="stompUrl" name="stompUrl" th:value="@{/stomp}" />
+
+        <canvas id="canvas"></canvas>
+
+        <input class="statusText" type="text" id="chatterName" readonly="" />
+
+        <video id="localVideo" class="localVideoWindow" autoplay="" muted=""></video>
+        <video id="remoteVideo" class="remotevideoWindow" autoplay=""></video>
+
+        <script src="../static/js/jquery-1.11.3.js" th:src="@{/js/jquery-1.11.3.js}"></script>
+        <script src="../static/js/sockjs-1.0.0.js" th:src="@{/js/sockjs-1.0.0.js}"></script>
+        <script src="../static/js/stomp.js" th:src="@{/js/stomp.js}"></script>
+        <script src="../static/js/adapter.js" th:src="@{/js/adapter.js}"></script>
+        <script src="../static/js/screensaver.js" th:src="@{/js/screensaver.js}"></script>
+        <script src="../static/js/webrtc.js" th:src="@{/js/webrtc.js}"></script>
+    </body>
+</html>

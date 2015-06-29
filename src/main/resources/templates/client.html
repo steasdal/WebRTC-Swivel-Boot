@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <link rel="stylesheet" type="text/css" media="all" href="../static/css/chat.css" th:href="@{/css/chat.css}" />
+    <link rel="stylesheet" type="text/css" media="all" href="../static/css/jquery-ui.css" th:href="@{/css/jquery-ui.css}" />
+
+    <script src="../static/js/jquery-1.11.3.js" th:src="@{/js/jquery-1.11.3.js}"></script>
+    <script src="../static/js/jquery-ui.js" th:src="@{/js/jquery-ui.js}"></script>
+    <script src="../static/js/sockjs-1.0.0.js" th:src="@{/js/sockjs-1.0.0.js}"></script>
+    <script src="../static/js/stomp.js" th:src="@{/js/stomp.js}"></script>
+    <script src="../static/js/adapter.js" th:src="@{/js/adapter.js}"></script>
+
+    <script th:inline="javascript">
+        /*<![CDATA[*/
+
+        $(function() {
+            var name = $("#name").val();
+            var chatId = $("#chatId").val();
+            var serverId = $("#serverId").val();
+            var stompUrl = $("#stompUrl").val();
+
+            var socket = new SockJS(stompUrl);
+            var client = Stomp.over(socket);
+
+            var rtcMessageSubscription;
+
+            var localVideo = $("#localVideo")[0];
+            var remoteVideo = $("#remoteVideo")[0];
+
+            var localStream, remoteStream, rtcPeerConnection;
+            var isInitiator = false;
+            var isStarted = false;
+
+            var remoteChatter = undefined;
+
+            var rtcConstraints = {video: true, audio:true};
+
+            var servoUpdateIntervalId;
+            var servoUpdatePollFrequency = 63; // poll 16 times a second; 1000/16 = 62.5 so we'll round up to 63 milliseconds
+
+            var gamepadPollIntervalId;
+            var gamepadPollFrequency = 50;     // poll 20 times a second; 1000/20 = 50 milliseconds
+            var gamepadAxis0position = 0.0;
+            var gamepadAxis1position = 0.0;
+            var gamepadButton10value = 0.0;
+
+            // We'll use Google's unofficial public STUN server (NO TURN support!)
+            var rtcConfiguration = {'iceServers': [{'url': 'stun:stun.l.google.com:19302'}]};
+
+            client.connect({}, function() {
+
+                // Register the existence of this new chat client with the server
+                var json = {"name": name, "chatId": chatId};
+                client.send("/app/register", {}, JSON.stringify(json));
+
+                // Subscribe to my own private channel for WebRTC messages
+                rtcMessageSubscription = client.subscribe("/topic/rtcMessage/" + chatId, function(rawMessage) {
+                    var messageBody = JSON.parse(rawMessage.body);
+
+                    switch(messageBody.type) {
+                        case "chat-acknowledged":        // You've sent a chat offer and the remote participant has acknowledged - prepare to chat!
+                            if( messageBody.sender === remoteChatter ) {
+                                console.log("Chat acknowledged by " + remoteChatter);
+                                startChat();
+                            } else {
+                                console.log("Chat acknowledgement expected by " + remoteChatter + " but received by " + messageBody.sender);
+                            }
+                            break;
+                        case "disconnect-offer":         // You've received a disconnect offer from your chat participant - prepare to disconnect
+                            acknowledgeChatHangup();
+                            endChat();
+                            cleanupAfterVideoChat();
+                            remoteChatter = undefined;
+                            console.log("Disconnecting from chat with " + messageBody.sender);
+                            break;
+                        case "disconnect-acknowledged":  // You've sent a disconnect offer to your chat participant and received this acknowledgement - disconnect complete
+                            endChat();
+                            cleanupAfterVideoChat();
+                            console.log("Disconnected from chat with " + messageBody.sender);
+                            break;
+                        case "offer":                    // Your chat partner has sent you an offer (an RTC Session Description)
+                            console.log("offer received from " + remoteChatter);
+                            rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(messageBody));
+                            doAnswer();
+                            break;
+                        case "answer":                   // Your chat partner has responded to your offer with an answer (also an RTC Session Description)
+                            console.log("answer received from " + remoteChatter);
+                            rtcPeerConnection.setRemoteDescription(new RTCSessionDescription(messageBody));
+                            break;
+                        case "candidate":                // Your chat partner has sent you one of presumably many ICE candidates
+                            console.log("ice candidate received from " + remoteChatter);
+                            var candidate = new RTCIceCandidate({sdpMLineIndex:messageBody.label, candidate:messageBody.candidate});
+                            rtcPeerConnection.addIceCandidate(candidate);
+                            break;
+
+                        default:
+                            console.log("Unknown message type: ", messageBody.type);
+                    }
+                });
+
+                startUpdatePolling();
+                startLocalVideo();
+            });
+
+            /*************************************************************************************/
+
+            function sendMessage(message){
+                console.log('Sending message to ' + remoteChatter + ': ', message);
+                client.send("/app/rtcMessage/" + remoteChatter, {}, JSON.stringify(message));
+            }
+
+            function sendChatInvitation() {
+                var json = {type:'chat-offer', sender:chatId, name:name};
+                sendMessage(json);
+            }
+
+            function sendChatHangup() {
+                var json = {type:'disconnect-offer', sender:chatId};
+                sendMessage(json);
+            }
+
+            function acknowledgeChatHangup() {
+                var json = {type:'disconnect-acknowledged', sender:chatId};
+                sendMessage(json);
+            }
+
+            function cleanupAfterVideoChat() {
+                isInitiator = false;
+            }
+
+            /*************************************************************************************/
+
+            function handleUserMedia(stream) {
+                localStream = stream;
+
+                console.log(stream.getVideoTracks()[0]);
+
+                attachMediaStream(localVideo, stream);
+                console.log('Local media stream added.  Initiating session...');
+
+                // Once the local video stream is obtained, immediately
+                // initiate a video session with the server portal.
+                remoteChatter = serverId;
+                isInitiator = true;
+                sendChatInvitation();
+                console.log('Session initiated');
+            }
+
+            function handleUserMediaError(error){
+                console.log('navigator.getUserMedia error: ', error);
+            }
+
+            function startLocalVideo() {
+                console.log('Getting user media with rtcConstraints', rtcConstraints);
+                getUserMedia(rtcConstraints, handleUserMedia, handleUserMediaError);
+            }
+
+            function startChat() {
+                if (!isStarted && localStream) {
+                    createPeerConnection();
+                    rtcPeerConnection.addStream(localStream);
+                    isStarted = true;
+                    if (isInitiator) {
+                        doCall();
+                    }
+                }
+            }
+
+            function endChat() {
+                if(isStarted) {
+                    isStarted = false;
+                    rtcPeerConnection.close();
+                    rtcPeerConnection = null;
+                    remoteStream = null;
+                }
+            }
+
+            function createPeerConnection() {
+                try {
+                    rtcPeerConnection = new RTCPeerConnection(rtcConfiguration);
+                    rtcPeerConnection.onicecandidate = handleIceCandidate;
+                    console.log('Created RTCPeerConnnection');
+                } catch (e) {
+                    console.log('Failed to create PeerConnection, exception: ' + e.message);
+                    alert('Cannot create RTCPeerConnection object.');
+                    return;
+                }
+                rtcPeerConnection.onaddstream = handleRemoteStreamAdded;
+                rtcPeerConnection.onremovestream = handleRemoteStreamRemoved;
+            }
+
+            function doCall() {
+                console.log('Sending offer to peer');
+                rtcPeerConnection.createOffer(setLocalAndSendMessage, null);
+            }
+
+            function doAnswer() {
+                console.log('Sending answer to peer.');
+                rtcPeerConnection.createAnswer(setLocalAndSendMessage, null);
+            }
+
+            function tryHangup() {
+                if(isStarted) {
+                    sendChatHangup();
+                    remoteChatter = undefined;
+                }
+            }
+
+            function setLocalAndSendMessage(sessionDescription) {
+                rtcPeerConnection.setLocalDescription(sessionDescription);
+                sendMessage(sessionDescription)
+            }
+
+            function handleRemoteStreamAdded(event) {
+                console.log( event.stream ? "Remote stream NOT added" : "Remote stream added" );
+                console.log(event);
+
+                attachMediaStream(remoteVideo, event.stream);
+                remoteStream = event.stream;
+            }
+            function handleRemoteStreamRemoved(event) {
+                console.log('Remote stream removed. Event: ', event);
+            }
+
+            function handleIceCandidate(event) {
+                console.log('handleIceCandidate event: ', event);
+                if (event.candidate) {
+                    var messageMap = {
+                        type: 'candidate',
+                        label: event.candidate.sdpMLineIndex,
+                        id: event.candidate.sdpMid,
+                        candidate: event.candidate.candidate
+                    };
+
+                    sendMessage(messageMap);
+                } else {
+                    console.log('End of candidates.');
+                }
+            }
+
+            /*************************************************************************************/
+
+            var panMin = 15;
+            var panMax = 165;
+            var panHome = 90;
+
+            var tiltMin = 60;
+            var tiltMax = 105;
+            var tiltHome = 90;
+
+            var panCurrentPosition = panHome;
+            var tiltCurrentPosition = tiltHome;
+
+            var panUpdatePosition = 90;
+            var tiltUpdatePosition = 90;
+
+            // Pan servo
+            $("#servo01value").val(90);
+            $("#servo01-slider").slider({
+                value: panCurrentPosition,
+                min: panMin,
+                max: panMax,
+                animate: true,
+                slide: function( event, ui ) {
+                    var slideval = ui.value;
+                    setPanPosition(slideval);
+                }
+            });
+
+            // Tilt servo
+            $("#servo02value").val(90);
+            $("#servo02-slider").slider({
+                orientation: "vertical",
+                value: tiltCurrentPosition,
+                min: tiltMin,
+                max: tiltMax,
+                animate: true,
+                slide: function( event, ui ) {
+                    var slideval = ui.value;
+                    setTiltPosition(slideval);
+                }
+            });
+
+            function setPanPosition(value) {
+                $("#servo01value").val(value);
+                panUpdatePosition = value;
+            }
+
+            function setTiltPosition(value) {
+                $("#servo02value").val(value);
+                tiltUpdatePosition = value;
+            }
+
+            function sendPositionUpdates() {
+                if(panUpdatePosition != panCurrentPosition) {
+                    panCurrentPosition = panUpdatePosition;
+                    client.send("/app/servo01", {}, JSON.stringify(panMax - panCurrentPosition));
+                }
+
+                if(tiltUpdatePosition != tiltCurrentPosition) {
+                    tiltCurrentPosition = tiltUpdatePosition;
+                    client.send("/app/servo02", {}, JSON.stringify(tiltCurrentPosition));
+                }
+            }
+
+            function startUpdatePolling() {
+                servoUpdateIntervalId = setInterval(sendPositionUpdates, servoUpdatePollFrequency);
+            }
+
+            /*************************************************************************************/
+
+            window.addEventListener("gamepadconnected", function(event) {
+                console.log("Gamepad connected: " + event.gamepad.id);
+                gamepadPollIntervalId = setInterval(pollGamepad, gamepadPollFrequency);
+            });
+
+            window.addEventListener("gamepaddisconnected", function(event) {
+                console.log("Disconnecting gamepad: " + event.gamepad.id);
+                clearInterval(gamepadPollIntervalId);
+            });
+
+            function pollGamepad() {
+                var gamepads = navigator.getGamepads ? navigator.getGamepads() : (navigator.webkitGetGamepads ? navigator.webkitGetGamepads : []);
+
+                if (!gamepads) {
+                    return;
+                }
+
+                var gamepad = gamepads[0];
+
+                if(gamepad) {
+                    if(gamepad.buttons[10].value != gamepadButton10value) {
+                        gamepadButton10value = gamepad.buttons[10].value;
+                        console.log("Gamepad Button 10 Value: " +  gamepadButton10value);
+
+                        $("#servo01-slider").slider('value', panHome);
+                        setPanPosition(panHome);
+
+                        $("#servo02-slider").slider('value', tiltHome);
+                        setTiltPosition(tiltHome);
+                    }
+
+                    var panIncrement = Math.round(map_range(gamepad.axes[0], -1.0, 1.0, -5, 5));
+                    var panSliderPosition = panCurrentPosition;
+
+                    if( panIncrement ) {
+                        if( panIncrement > 0 ) {
+                            panSliderPosition = Math.min(panMax, panCurrentPosition + panIncrement);
+                        } else if( panIncrement < 0 ) {
+                            panSliderPosition = Math.max(panMin, panCurrentPosition + panIncrement);
+                        }
+
+                        $("#servo01-slider").slider('value', panSliderPosition);
+                        setPanPosition(panSliderPosition);
+                    }
+
+                    var tiltIncrement = Math.round(map_range(gamepad.axes[1], -1.0, 1.0, -3, 3));
+                    var tiltSliderPosition = tiltCurrentPosition;
+
+                    if( tiltIncrement ) {
+                        if( tiltIncrement > 0 ) {
+                            tiltSliderPosition = Math.min(tiltMax, tiltCurrentPosition + tiltIncrement);
+                        } else if( tiltIncrement < 0 ) {
+                            tiltSliderPosition = Math.max(tiltMin, tiltCurrentPosition + tiltIncrement);
+                        }
+
+                        $("#servo02-slider").slider('value', tiltSliderPosition);
+                        setTiltPosition(tiltSliderPosition);
+                    }
+                }
+            }
+
+            function map_range(value, low1, high1, low2, high2) {
+                return low2 + (high2 - low2) * (value - low1) / (high1 - low1);
+            }
+
+            /*************************************************************************************/
+
+            // Exit neatly on window unload
+            $(window).on('beforeunload', function(){
+                // Perchance we happen to be in a video chat, hang up.
+                tryHangup();
+
+                // Stop polling for updates
+                clearInterval(servoUpdateIntervalId);
+
+                // Unsubscribe from all channels
+                rtcMessageSubscription.unsubscribe();
+
+                // Delete this chatter from the Chatter table
+                json = {"chatId": chatId};
+                client.send("/app/unregister", {}, JSON.stringify(json));
+
+                // Disconnect the websocket connection
+                client.disconnect();
+            });
+
+            // ******* debug messages to the console, please ********
+            client.debug = function(str) {
+                console.log(str);
+            };
+        });
+
+        /*]]>*/
+    </script>
+</head>
+    <body class="videoBody">
+        <input type="hidden" id="chatId" name="chatId" th:value="${chatId}" />
+        <input type="hidden" id="serverId" name="serverId" th:value="${serverId}" />
+        <input type="hidden" id="name" name="name" th:value="${name}" />
+        <input type="hidden" id="stompUrl" name="stompUrl" th:value="@{/stomp}" />
+
+        <video id="localVideo" class="localVideoWindow" autoplay="" muted=""></video>
+        <video id="remoteVideo" class="remotevideoWindow" autoplay=""></video>
+
+        <div id="tilt-slider-control" >
+            <label class="sliderLabel" for="servo02value">tilt:</label>
+            <input class="sliderText" type="text" id="servo02value" readonly="" />
+            <div id="servo02-slider"></div>
+        </div>
+
+        <div id="pan-slider-control" >
+            <label class="sliderLabel" for="servo01value">pan:</label>
+            <input class="sliderText" type="text" id="servo01value" readonly="" />
+            <div id="servo01-slider"></div>
+        </div>
+    </body>
+</html>

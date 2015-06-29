@@ -1,0 +1,88 @@
+<!DOCTYPE HTML>
+
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+    <head>
+        <link rel="stylesheet" type="text/css" media="all" href="../static/css/chat.css" th:href="@{/css/chat.css}" />
+
+        <script src="../static/js/jquery-1.11.3.js" th:src="@{/js/jquery-1.11.3.js}"></script>
+        <script src="../static/js/sockjs-1.0.0.js" th:src="@{/js/sockjs-1.0.0.js}"></script>
+        <script src="../static/js/stomp.js" th:src="@{/js/stomp.js}"></script>
+
+        <title>Client Landing Page</title>
+    </head>
+
+    <body>
+
+        <form name="client" th:action="@{/client}">
+            <input type="hidden" id="chatId" name="chatId" th:value="${chatId}" />
+
+            <div class="boxed">
+                <label for="name">Enter your name: </label>
+                <input type="text" id="name" name="name" required=""/>
+            </div>
+
+            <div class = "boxed">
+                <label for="statusMessage">Host status:</label>
+                <input type="text" id="statusMessage" readonly=""/>
+            </div>
+
+            <fieldset class="buttons">
+                <button name="submit" id="submit" type="submit" disabled="disabled">Connect as Portal</button>
+            </fieldset>
+        </form>
+
+        <script th:inline="javascript">
+            /*<![CDATA[*/
+
+            $(function() {
+                var socket = new SockJS("/stomp");
+                var client = Stomp.over(socket);
+
+                var submitButton = $("#submit");
+                var statusMessage = $("#statusMessage");
+                var statusSubscription;
+
+                client.connect({}, function() {
+
+                    // Register for status updates
+                    statusSubscription = client.subscribe("/topic/status", function(message) {
+                        var obj = JSON.parse(message.body);
+
+                        switch(obj.status) {
+                            case "no_server":  // The server page hasn't been opened yet
+                                submitButton.prop('disabled', true);
+                                statusMessage.val("Offline");
+                                break;
+                            case "busy":       // Some other client is controlling the server portal
+                                submitButton.prop('disabled', true);
+                                statusMessage.val("Busy");
+                                break;
+                            case "ready":      // Awww yeah, we're ready to chat!
+                                submitButton.prop('disabled', false);
+                                statusMessage.val("Ready");
+                                break;
+                            default:           // Uh... what?  Where'd this come from?
+                                console.log("Unexpected status from /topic/status: " + obj.status);
+                                break;
+                        }
+                    });
+
+                    // Trigger a status update
+                    client.send("/app/status", {}, "");
+                });
+
+                // Exit neatly on window unload
+                $(window).on('beforeunload', function(){
+
+                    // Unsubscribe from the status channel
+                    statusSubscription.unsubscribe();
+
+                    // Disconnect the websocket connection
+                    client.disconnect();
+                });
+            });
+
+            /*]]>*/
+        </script>
+    </body>
+</html>

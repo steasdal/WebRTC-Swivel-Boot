@@ -1,0 +1,21 @@
+<!DOCTYPE HTML>
+
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+    <head>
+        <link rel="stylesheet" type="text/css" media="all" href="../static/css/chat.css" th:href="@{/css/chat.css}" />
+
+        <title>Host Landing Page</title>
+    </head>
+
+    <body>
+        <br></br>
+        <H4>You're connecting from localhost... you'll be the host!</H4>
+        <br></br>
+
+        <form name="server" th:action="@{/server}">
+            <fieldset class="buttons">
+                <button name="server" type="submit">Connect as Portal</button>
+            </fieldset>
+        </form>
+    </body>
+</html>

@@ -14,6 +14,7 @@ apply plugin: "spring-boot"
 repositories {
     jcenter()
     mavenCentral()
+    maven { url "http://dl.bintray.com/steasdal/arduino" }
 }
 
 def springbootVersion = "1.2.3.RELEASE"
@@ -22,13 +23,17 @@ dependencies {
     compile "org.codehaus.groovy:groovy-all:2.4.3"
     compile "org.springframework.boot:spring-boot-starter-web:${springbootVersion}"
     compile "org.springframework.boot:spring-boot-starter-jdbc:${springbootVersion}"
+    compile "org.springframework.boot:spring-boot-starter-thymeleaf:${springbootVersion}"
+    compile "org.springframework.boot:spring-boot-starter-websocket:${springbootVersion}"
+    compile "org.springframework:spring-messaging:4.1.6.RELEASE"
     compile "org.grails:gorm-hibernate4-spring-boot:1.1.0.RELEASE"
     compile "org.apache.commons:commons-lang3:3.3.2"
 
-    compile "org.postgresql:postgresql:9.4-1201-jdbc4"
     compile "com.h2database:h2"
 
     compile 'org.slf4j:slf4j-api:1.7.12'
+
+    compile "org.teasdale:arduino-serial:0.2"
 
     testCompile 'junit:junit:4.12'
     testCompile "org.spockframework:spock-core:0.7-groovy-2.0"
