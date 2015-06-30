@@ -1,19 +1,8 @@
-var ctx, W, H, particles, interval;
+var canvas, ctx, W, H, particles, interval;
 
-var canvas = $("#canvas");
-
-function enableScreenSaver() {
-    canvas.show();
-    startScreenSaver(canvas);
-}
-
-function disableScreenSaver() {
-    stopScreenSaver();
-    canvas.hide();
-}
-
-function startScreenSaver() {
-    ctx = canvas.get(0).getContext("2d");
+function startScreenSaver(incomingCanvas) {
+    canvas = incomingCanvas;
+    ctx = canvas.getContext("2d");
 
     W = window.innerWidth;
     H = window.innerHeight;
@@ -35,6 +24,7 @@ function stopScreenSaver() {
     interval = undefined;
     particles = undefined;
     ctx = undefined;
+    canvas = undefined;
 }
 
 function particle()

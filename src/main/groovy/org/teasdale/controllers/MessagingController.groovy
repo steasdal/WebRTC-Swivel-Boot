@@ -29,8 +29,6 @@ class MessagingController {
     @MessageMapping("/register")
     protected void register(RegistrationMessage registrationMessage) {
         try {
-            log.info "registering new chatter in MessagingController - name: ${registrationMessage.name}, chatId: ${registrationMessage.chatId}"
-
             chatterService.newChatter(registrationMessage.name, registrationMessage.chatId)
 
             if( registrationMessage.chatId == Constants.SERVER_CHAT_ID ) {
